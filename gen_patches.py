@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 
 import io
-import ips
 import argparse
+import zipfile
 from pathlib import Path
+
+import ips
 from PIL import Image
 
 # Build Id: offset
@@ -26,15 +28,9 @@ patch_info = {
     "D689E9FAE7CAA4EC30B0CD9B419779F73ED3F88B": 1655040,
 }
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("patches_dir", help="The directory where the generated patches will be dumped", type=Path)
-    parser.add_argument("new_logo", help="The new logo image", type=Path)
-    parser.add_argument("-o", "--old_logo", help="The original logo image", type=Path, default=None)
-    args = parser.parse_args()
-
-    if args.old_logo is None:
-        new_logo = Image.open(args.new_logo).convert("RGBA")
+def patches(new_logo_file : str, old_logo_file : str = None):
+    if not old_logo_file:
+        new_logo = Image.open(new_logo_file).convert("RGBA")
         if new_logo.size != (308, 350):
             raise ValueError("Invalid size for the logo")
 
@@ -47,21 +43,40 @@ if __name__ == "__main__":
         while new_f.tell() < new_len:
             base_patch.add_record(new_f.tell(), new_f.read(0xFFFF))
     else:
-        old_logo = Image.open(args.old_logo).convert("RGBA")
-        new_logo = Image.open(args.new_logo).convert("RGBA")
+        old_logo = Image.open(old_logo_file).convert("RGBA")
+        new_logo = Image.open(new_logo_file).convert("RGBA")
         if old_logo.size != (308, 350) or new_logo.size != (308, 350):
             raise ValueError("Invalid size for the logo")
-
         base_patch = ips.Patch.create(old_logo.tobytes(), new_logo.tobytes())
 
-    if not args.patches_dir.exists():
-        args.patches_dir.mkdir(parents=True)
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED, False) as zip_obj:
+        for build_id, offset in patch_info.items():
+            tmp_p = ips.Patch()
+            for r in base_patch.records:
+                tmp_p.add_record(r.offset + offset, r.content, r.rle_size)
+            zip_obj.writestr(f"{build_id}.ips", bytes(tmp_p))
+    zip_buffer.seek(0)
+    return zip_buffer.read()
 
-    for build_id, offset in patch_info.items():
-        tmp_p = ips.Patch()
+def patches_status(*args, **kwargs):
+    try:
+        return (True, patches(*args, **kwargs))
+    except Exception as e:
+        return (False, e)
 
-        for r in base_patch.records:
-            tmp_p.add_record(r.offset + offset, r.content, r.rle_size)
-
-        with Path(args.patches_dir, f"{build_id}.ips").open("wb") as f:
-            f.write(bytes(tmp_p))
+if __name__ == "__main__":
+    print("Generating Patches")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("patches_dir", help="The directory where the patches.zip will be placed", type=Path)
+    parser.add_argument("new_logo", help="The new logo image", type=Path)
+    parser.add_argument("-o", "--old_logo", help="The original logo image", type=Path, default=None)
+    args = parser.parse_args()
+    old_logo = args.old_logo or args.new_logo
+    status, val = patches_status(args.new_logo, old_logo)
+    if not status:
+        print(f"An error occured generating patches.\n{val}")
+    else:
+        with open(Path(args.patches_dir, "patches.zip"), "wb+") as patches:
+            patches.write(val)
+    print("Done!")
