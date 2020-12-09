@@ -2,7 +2,7 @@
 
 Modualized version of [friedkeenan's switch-logo-patcher](https://github.com/friedkeenan/switch-logo-patcher)
 
-As a script it produces a zip containing the patches in a zip at the target output location.
+As a script it produces a zip containing the patches at the target output location.
 As a module it returns a bytestring of the zip.
 
 Creates the IPS patches needed to replace the Switch logo on boot.
